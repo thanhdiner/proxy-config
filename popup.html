@@ -3,158 +3,127 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bypass Flow - Custom URL Proxy</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <title>Bypass Flow</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div class="app-container">
-    <!-- Header -->
     <header class="app-header">
       <div class="logo-area">
-        <svg class="logo-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM11 16H13V18H11V16ZM11 6H13V14H11V6Z" fill="url(#logo-grad)"/>
-          <defs>
-            <linearGradient id="logo-grad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#8a2387"/>
-              <stop offset="0.5" stop-color="#e94057"/>
-              <stop offset="1" stop-color="#f27121"/>
-            </linearGradient>
-          </defs>
-        </svg>
+        <div class="logo-mark" aria-hidden="true">BF</div>
         <div class="logo-text">
           <h1>Bypass Flow</h1>
-          <span class="sub-text">URL-specific proxy</span>
+          <span>Per-site proxy routing</span>
         </div>
       </div>
-      
-      <!-- Enable Toggle -->
-      <div class="toggle-container">
-        <label class="switch">
-          <input type="checkbox" id="extension-toggle">
-          <span class="slider round"></span>
-        </label>
-      </div>
+
+      <label class="switch" title="Enable or disable all proxy routes">
+        <input type="checkbox" id="extension-toggle">
+        <span class="slider"></span>
+      </label>
     </header>
 
-    <!-- Main Panel -->
     <main class="app-body">
-      <!-- Status Summary Card -->
-      <section class="status-card" id="status-card">
+      <section class="status-card disabled" id="status-card">
         <div class="status-indicator">
-          <span class="status-dot" id="status-dot"></span>
-          <span class="status-label" id="status-text">Checking...</span>
+          <span class="status-dot"></span>
+          <div>
+            <span class="eyebrow">Routing status</span>
+            <strong class="status-label" id="status-text">Disabled</strong>
+          </div>
         </div>
         <div class="status-stats">
           <div class="stat-item">
-            <span class="stat-value" id="rules-count">0</span>
-            <span class="stat-title">Active Rules</span>
+            <strong id="proxy-count">0</strong>
+            <span>Proxies</span>
           </div>
           <div class="stat-item">
-            <span class="stat-value" id="proxy-summary">None</span>
-            <span class="stat-title">Proxy Type</span>
+            <strong id="routes-count">0</strong>
+            <span>Rules</span>
           </div>
         </div>
       </section>
 
-      <!-- Configuration Form -->
-      <section class="config-section">
-        <h2 class="section-title">Proxy Configuration</h2>
-        <div class="card form-card">
-          <!-- Proxy Type -->
-          <div class="form-group">
-            <label for="proxy-type">Server Protocol</label>
-            <div class="select-wrapper">
-              <select id="proxy-type">
-                <option value="HTTP">HTTP (Default)</option>
-                <option value="HTTPS">HTTPS (SSL Secure)</option>
-                <option value="SOCKS5">SOCKS5 (Tunnel)</option>
-              </select>
-            </div>
+      <section class="current-site-card" id="current-site-card">
+        <div class="current-site-main">
+          <div class="site-orb" aria-hidden="true"><span></span></div>
+          <div class="current-site-copy">
+            <span class="eyebrow">Current tab</span>
+            <strong id="current-host">Detecting website…</strong>
+            <span id="current-route-detail">Checking the active route</span>
           </div>
-
-          <!-- Host & Port Row -->
-          <div class="form-row">
-            <div class="form-group flex-3">
-              <label for="proxy-host">Server Host / IP</label>
-              <input type="text" id="proxy-host" placeholder="proxy.example.com or IP">
-            </div>
-            <div class="form-group flex-1">
-              <label for="proxy-port">Port</label>
-              <input type="number" id="proxy-port" placeholder="8080" min="1" max="65535">
-            </div>
-          </div>
-
-          <!-- Credentials Accordion Toggle -->
-          <div class="auth-toggle-header" id="auth-toggle">
-            <span>Authentication (Optional)</span>
-            <svg class="chevron-icon" id="auth-chevron" viewBox="0 0 24 24" width="16" height="16">
-              <path d="M7 10l5 5 5-5z" fill="currentColor"/>
-            </svg>
-          </div>
-
-          <!-- Credentials Fields -->
-          <div class="auth-fields hidden" id="auth-fields">
-            <div class="form-row">
-              <div class="form-group">
-                <label for="proxy-username">Username</label>
-                <input type="text" id="proxy-username" placeholder="Username">
-              </div>
-              <div class="form-group">
-                <label for="proxy-password">Password</label>
-                <input type="password" id="proxy-password" placeholder="Password">
-              </div>
-            </div>
-          </div>
+        </div>
+        <div class="current-site-action">
+          <span class="route-state neutral" id="current-route-badge">CHECK</span>
+          <button type="button" class="text-button hidden" id="btn-add-current-route">Add rule</button>
         </div>
       </section>
 
-      <!-- Routing Rules Section -->
       <section class="config-section">
         <div class="section-header">
-          <h2 class="section-title">Bypass Rules</h2>
-          <span class="info-tooltip" title="Match examples:&#10;• medium.com (domain & subdomains)&#10;• *.medium.com (subdomains only)&#10;• https://medium.com/story/ (exact prefix)">🛈 Pattern Tips</span>
-        </div>
-        <div class="card rule-card">
-          <label for="proxy-rules" class="sr-only">Routing patterns, one per line</label>
-          <textarea id="proxy-rules" placeholder="medium.com&#10;*.medium.com&#10;https://medium.com/story/" spellcheck="false"></textarea>
-          <div class="textarea-footer">
-            <span>One domain/pattern per line. Empty lines ignored.</span>
+          <div>
+            <h2>Proxy profiles</h2>
+            <p>IPv4, domain names and IPv6 are supported.</p>
           </div>
+          <button type="button" class="btn btn-small" id="btn-add-proxy">
+            <span aria-hidden="true">＋</span> Add
+          </button>
+        </div>
+        <div class="stack" id="proxy-list"></div>
+      </section>
+
+      <section class="config-section">
+        <div class="section-header">
+          <div>
+            <h2>Routing rules</h2>
+            <p>Rules run from top to bottom. First match wins.</p>
+          </div>
+          <button type="button" class="btn btn-small" id="btn-add-route">
+            <span aria-hidden="true">＋</span> Add
+          </button>
+        </div>
+        <div class="stack" id="route-list"></div>
+        <div class="hint-card" aria-label="Rule examples">
+          <span>Examples</span>
+          <code>example.com</code>
+          <code>*.example.com</code>
+          <code>https://example.com/path/</code>
         </div>
       </section>
 
-      <!-- Tester Tool Section -->
       <section class="config-section">
-        <h2 class="section-title">Test Routing</h2>
-        <div class="card test-card">
-          <div class="test-input-row">
-            <input type="url" id="test-url" placeholder="https://medium.com/p/1234">
-            <button type="button" class="btn btn-secondary" id="btn-test">Test</button>
+        <div class="section-header">
+          <div>
+            <h2>Test routing</h2>
+            <p>Preview the current form before applying changes.</p>
           </div>
+        </div>
+        <div class="card test-card">
+          <label class="field field-grow">
+            <span>Website URL</span>
+            <div class="test-input-row">
+              <input type="url" id="test-url" placeholder="https://example.com/page" autocomplete="off">
+              <button type="button" class="btn btn-secondary" id="btn-test">Test</button>
+            </div>
+          </label>
           <div class="test-result-box hidden" id="test-result">
-            <div class="result-badge" id="result-badge">DIRECT</div>
-            <div class="result-reason" id="result-reason">Default direct route</div>
+            <span class="result-badge direct" id="result-badge">DIRECT</span>
+            <span class="result-reason" id="result-reason">No matching rule</span>
           </div>
         </div>
       </section>
     </main>
 
-    <!-- Footer / Actions -->
     <footer class="app-footer">
-      <div id="toast" class="toast hidden">Settings Saved Successfully!</div>
-      <button type="button" class="btn btn-primary" id="btn-save">
-        <svg class="btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
-          <polyline points="17 21 17 13 7 13 7 21"></polyline>
-          <polyline points="7 3 7 8 15 8"></polyline>
-        </svg>
-        Save & Apply Configuration
-      </button>
+      <div class="save-state" id="save-state">
+        <span class="save-state-dot"></span>
+        <span id="save-state-text">Up to date</span>
+      </div>
+      <button type="button" class="btn btn-primary" id="btn-save" disabled>Apply changes</button>
+      <div id="toast" class="toast hidden" role="status" aria-live="polite">Saved</div>
     </footer>
   </div>
+
   <script src="popup.js"></script>
 </body>
 </html>

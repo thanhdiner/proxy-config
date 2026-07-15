@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Bypass Flow - Custom URL Proxy",
-  "version": "1.0.0",
-  "description": "Route specific URLs/domains through HTTP, HTTPS, or SOCKS5 proxies using dynamic PAC rules.",
+  "version": "1.2.0",
+  "description": "Route each site through a selected HTTP, HTTPS, or SOCKS5 proxy with IPv4 and IPv6 support.",
   "permissions": [
     "proxy",
     "storage",
     "webRequest",
-    "webRequestAuthProvider"
+    "webRequestAuthProvider",
+    "tabs"
   ],
   "host_permissions": [
     "<all_urls>"
