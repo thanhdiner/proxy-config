@@ -11,20 +11,33 @@ document.addEventListener('DOMContentLoaded', () => {
   const proxyList = document.getElementById('proxy-list');
   const routeList = document.getElementById('route-list');
   const btnAddProxy = document.getElementById('btn-add-proxy');
+  const btnImportProxy = document.getElementById('btn-import-proxy');
   const btnAddRoute = document.getElementById('btn-add-route');
   const btnSave = document.getElementById('btn-save');
   const saveState = document.getElementById('save-state');
   const saveStateText = document.getElementById('save-state-text');
   const testUrl = document.getElementById('test-url');
   const btnTest = document.getElementById('btn-test');
+  const btnProbe = document.getElementById('btn-probe');
+  const btnTestAllRules = document.getElementById('btn-test-all-rules');
   const testResult = document.getElementById('test-result');
+  const testBatch = document.getElementById('test-batch');
   const resultBadge = document.getElementById('result-badge');
   const resultReason = document.getElementById('result-reason');
+  const probeBadge = document.getElementById('probe-badge');
+  const probeReason = document.getElementById('probe-reason');
   const toast = document.getElementById('toast');
   const currentHost = document.getElementById('current-host');
   const currentRouteBadge = document.getElementById('current-route-badge');
   const currentRouteDetail = document.getElementById('current-route-detail');
   const btnAddCurrentRoute = document.getElementById('btn-add-current-route');
+  const importModal = document.getElementById('import-modal');
+  const importDefaultType = document.getElementById('import-default-type');
+  const importProxyText = document.getElementById('import-proxy-text');
+  const importFeedback = document.getElementById('import-feedback');
+  const btnImportClose = document.getElementById('btn-import-close');
+  const btnImportCancel = document.getElementById('btn-import-cancel');
+  const btnImportConfirm = document.getElementById('btn-import-confirm');
 
   let proxies = [];
   let routes = [];
@@ -46,6 +59,370 @@ document.addEventListener('DOMContentLoaded', () => {
       username: '',
       password: ''
     };
+  }
+
+  function mapSchemeToType(scheme) {
+    const value = String(scheme || '').toLowerCase().replace(/:$/, '');
+    if (value === 'https') return 'HTTPS';
+    if (value === 'socks5' || value === 'socks4' || value === 'socks') return 'SOCKS5';
+    if (value === 'http' || value === 'proxy') return 'HTTP';
+    return null;
+  }
+
+  function isValidPort(port) {
+    return Number.isInteger(port) && port >= 1 && port <= 65535;
+  }
+
+  function decodeMaybe(value) {
+    try {
+      return decodeURIComponent(String(value || ''));
+    } catch {
+      return String(value || '');
+    }
+  }
+
+  function proxyFingerprint(proxy) {
+    return [
+      String(proxy.type || 'HTTP').toUpperCase(),
+      normalizeHost(proxy.host).toLowerCase(),
+      String(proxy.port || ''),
+      String(proxy.username || ''),
+      String(proxy.password || '')
+    ].join('|');
+  }
+
+  function parseHostPortAuth(value, type, username = '', password = '') {
+    let rest = String(value || '').trim();
+    if (!rest) return { error: 'Missing host' };
+
+    let host = '';
+    let portText = '';
+    let user = username;
+    let pass = password;
+
+    if (rest.startsWith('[')) {
+      const close = rest.indexOf(']');
+      if (close < 0) return { error: 'Invalid IPv6 host' };
+      host = rest.slice(1, close).trim();
+      rest = rest.slice(close + 1).trim();
+      if (!rest.startsWith(':')) return { error: 'Missing port after IPv6 host' };
+      const parts = rest.slice(1).split(':');
+      portText = parts[0];
+      if (parts.length >= 3) {
+        user = parts[1];
+        pass = parts.slice(2).join(':');
+      } else if (parts.length === 2) {
+        user = parts[1];
+        pass = '';
+      }
+    } else {
+      const parts = rest.split(':');
+      if (parts.length < 2) return { error: 'Expected host:port' };
+
+      if (parts.length === 2) {
+        host = parts[0];
+        portText = parts[1];
+      } else if (parts.length === 3) {
+        host = parts[0];
+        portText = parts[1];
+        user = parts[2];
+        pass = '';
+      } else {
+        host = parts[0];
+        portText = parts[1];
+        user = parts[2];
+        pass = parts.slice(3).join(':');
+      }
+    }
+
+    host = normalizeHost(host);
+    if (!host || /\s/.test(host) || host.includes('/')) {
+      return { error: 'Invalid host' };
+    }
+
+    const port = Number.parseInt(portText, 10);
+    if (!isValidPort(port)) return { error: 'Port must be 1–65535' };
+
+    return {
+      type: String(type || 'HTTP').toUpperCase(),
+      host,
+      port,
+      username: decodeMaybe(user),
+      password: decodeMaybe(pass)
+    };
+  }
+
+  function looksLikeHostPort(value) {
+    const text = String(value || '').trim();
+    if (!text) return false;
+    if (text.startsWith('[')) return /\]:\d+$/.test(text) || /\]:\d+:/.test(text);
+    const parts = text.split(':');
+    if (parts.length < 2) return false;
+    return /^\d+$/.test(parts[1]);
+  }
+
+  function parseProxyLine(rawLine, defaultType = 'HTTP') {
+    let line = String(rawLine || '').trim();
+    if (!line || line.startsWith('#') || line.startsWith('//')) {
+      return { skip: true };
+    }
+
+    if (
+      (line.startsWith('"') && line.endsWith('"')) ||
+      (line.startsWith("'") && line.endsWith("'"))
+    ) {
+      line = line.slice(1, -1).trim();
+    }
+
+    line = line.replace(/,\s*$/, '').trim();
+    if (!line) return { skip: true };
+
+    // type|host|port|user|pass  or  host|port|user|pass
+    if (line.includes('|') && !line.includes('://')) {
+      const parts = line.split('|').map((part) => part.trim());
+      if (parts.length >= 2) {
+        let type = defaultType;
+        let host;
+        let port;
+        let username = '';
+        let password = '';
+
+        const token = parts[0].toUpperCase();
+        const maybeType = mapSchemeToType(parts[0]) || (
+          token === 'HTTP' || token === 'HTTPS' || token === 'SOCKS5' || token === 'SOCKS'
+            ? (token === 'SOCKS' ? 'SOCKS5' : token)
+            : null
+        );
+
+        if (maybeType && parts.length >= 3) {
+          type = maybeType;
+          host = parts[1];
+          port = parts[2];
+          username = parts[3] || '';
+          password = parts.slice(4).join('|') || '';
+        } else {
+          host = parts[0];
+          port = parts[1];
+          username = parts[2] || '';
+          password = parts.slice(3).join('|') || '';
+        }
+
+        return parseHostPortAuth(
+          host.includes(':') && !host.startsWith('[') && host.includes('::')
+            ? `[${host}]:${port}`
+            : `${host}:${port}`,
+          type,
+          username,
+          password
+        );
+      }
+    }
+
+    // host,port,user,pass  (CSV without scheme)
+    if (line.includes(',') && !line.includes('://') && !line.includes('@')) {
+      const parts = line.split(',').map((part) => part.trim()).filter(Boolean);
+      if (parts.length >= 2 && /^\d+$/.test(parts[1])) {
+        const maybeType = mapSchemeToType(parts[0]) || (
+          ['HTTP', 'HTTPS', 'SOCKS5'].includes(parts[0].toUpperCase()) ? parts[0].toUpperCase() : null
+        );
+        if (maybeType && parts.length >= 3) {
+          return parseHostPortAuth(`${parts[1]}:${parts[2]}`, maybeType, parts[3] || '', parts.slice(4).join(',') || '');
+        }
+        return parseHostPortAuth(`${parts[0]}:${parts[1]}`, defaultType, parts[2] || '', parts.slice(3).join(',') || '');
+      }
+    }
+
+    // scheme://...
+    const schemeMatch = line.match(/^(https?|socks5?|socks4?|proxy):\/\//i);
+    if (schemeMatch) {
+      const type = mapSchemeToType(schemeMatch[1]) || defaultType;
+      const rest = line.slice(schemeMatch[0].length);
+
+      if (rest.includes('@')) {
+        const atIndex = rest.indexOf('@');
+        const userinfo = rest.slice(0, atIndex);
+        const hostport = rest.slice(atIndex + 1);
+        const colonIndex = userinfo.indexOf(':');
+        const username = colonIndex >= 0 ? userinfo.slice(0, colonIndex) : userinfo;
+        const password = colonIndex >= 0 ? userinfo.slice(colonIndex + 1) : '';
+        return parseHostPortAuth(hostport, type, username, password);
+      }
+
+      return parseHostPortAuth(rest, type);
+    }
+
+    // user:pass@host:port  OR  host:port@user:pass
+    if (line.includes('@')) {
+      const atIndex = line.indexOf('@');
+      const left = line.slice(0, atIndex);
+      const right = line.slice(atIndex + 1);
+
+      if (looksLikeHostPort(left) && !looksLikeHostPort(right)) {
+        const colonIndex = right.indexOf(':');
+        const username = colonIndex >= 0 ? right.slice(0, colonIndex) : right;
+        const password = colonIndex >= 0 ? right.slice(colonIndex + 1) : '';
+        return parseHostPortAuth(left, defaultType, username, password);
+      }
+
+      const colonIndex = left.indexOf(':');
+      const username = colonIndex >= 0 ? left.slice(0, colonIndex) : left;
+      const password = colonIndex >= 0 ? left.slice(colonIndex + 1) : '';
+      return parseHostPortAuth(right, defaultType, username, password);
+    }
+
+    return parseHostPortAuth(line, defaultType);
+  }
+
+  function parseProxyImportText(text, defaultType = 'HTTP') {
+    const raw = String(text || '').trim();
+    if (!raw) {
+      return { imported: [], errors: ['Paste at least one proxy line.'], skipped: 0 };
+    }
+
+    // JSON array of proxy objects
+    if (raw.startsWith('[')) {
+      try {
+        const data = JSON.parse(raw);
+        if (!Array.isArray(data)) {
+          return { imported: [], errors: ['JSON root must be an array.'], skipped: 0 };
+        }
+
+        const imported = [];
+        const errors = [];
+        data.forEach((item, index) => {
+          if (!item || typeof item !== 'object') {
+            errors.push(`Item ${index + 1}: expected an object`);
+            return;
+          }
+          const type = mapSchemeToType(item.type || item.protocol || item.scheme)
+            || (['HTTP', 'HTTPS', 'SOCKS5'].includes(String(item.type || '').toUpperCase())
+              ? String(item.type).toUpperCase()
+              : defaultType);
+
+          let endpoint = item.endpoint || item.address || item.proxy || '';
+          if (item.host != null && item.port != null) {
+            const hostValue = String(item.host).trim();
+            const needsBrackets = hostValue.includes(':') && !hostValue.startsWith('[');
+            endpoint = needsBrackets ? `[${hostValue}]:${item.port}` : `${hostValue}:${item.port}`;
+          }
+
+          const parsed = parseHostPortAuth(
+            endpoint,
+            type,
+            item.username || item.user || '',
+            item.password || item.pass || ''
+          );
+          if (parsed.error) {
+            errors.push(`Item ${index + 1}: ${parsed.error}`);
+            return;
+          }
+          imported.push({
+            ...parsed,
+            name: String(item.name || '').trim()
+          });
+        });
+        return { imported, errors, skipped: 0 };
+      } catch {
+        // Fall through to line parser if not valid JSON
+      }
+    }
+
+    const lines = raw.split(/\r?\n/);
+    const imported = [];
+    const errors = [];
+    let skipped = 0;
+
+    lines.forEach((line, index) => {
+      const parsed = parseProxyLine(line, defaultType);
+      if (parsed.skip) {
+        if (String(line || '').trim()) skipped += 1;
+        return;
+      }
+      if (parsed.error) {
+        errors.push(`Line ${index + 1}: ${parsed.error}`);
+        return;
+      }
+      imported.push(parsed);
+    });
+
+    return { imported, errors, skipped };
+  }
+
+  function openImportModal() {
+    importFeedback.className = 'import-feedback hidden';
+    importFeedback.textContent = '';
+    importProxyText.value = '';
+    importModal.classList.remove('hidden');
+    enhanceSelects(importModal);
+    requestAnimationFrame(() => importProxyText.focus());
+  }
+
+  function closeImportModal() {
+    importModal.classList.add('hidden');
+    importFeedback.className = 'import-feedback hidden';
+    importFeedback.textContent = '';
+  }
+
+  function applyImportedProxies() {
+    const defaultType = importDefaultType.value || 'HTTP';
+    const result = parseProxyImportText(importProxyText.value, defaultType);
+
+    if (result.imported.length === 0 && result.errors.length > 0) {
+      importFeedback.className = 'import-feedback error';
+      importFeedback.textContent = result.errors.slice(0, 4).join(' · ');
+      return;
+    }
+
+    if (result.imported.length === 0) {
+      importFeedback.className = 'import-feedback error';
+      importFeedback.textContent = 'No valid proxies found.';
+      return;
+    }
+
+    captureDraft();
+
+    const existing = new Set(proxies.map(proxyFingerprint));
+    let added = 0;
+    let duplicates = 0;
+    const startIndex = proxies.length;
+
+    result.imported.forEach((item, offset) => {
+      const fingerprint = proxyFingerprint(item);
+      if (existing.has(fingerprint)) {
+        duplicates += 1;
+        return;
+      }
+      existing.add(fingerprint);
+
+      const index = startIndex + added;
+      const name = item.name || `Proxy ${index + 1}`;
+      proxies.push(normalizeProxy({
+        id: createId('proxy'),
+        name,
+        type: item.type,
+        host: item.host,
+        port: item.port,
+        username: item.username,
+        password: item.password
+      }, index));
+      added += 1;
+    });
+
+    if (added === 0) {
+      importFeedback.className = 'import-feedback warn';
+      importFeedback.textContent = duplicates > 0
+        ? `No new proxies added (${duplicates} duplicate${duplicates === 1 ? '' : 's'} skipped).`
+        : 'No new proxies added.';
+      return;
+    }
+
+    renderAll();
+    closeImportModal();
+
+    const parts = [`Imported ${added} prox${added === 1 ? 'y' : 'ies'}`];
+    if (duplicates > 0) parts.push(`${duplicates} duplicate skipped`);
+    if (result.errors.length > 0) parts.push(`${result.errors.length} line error`);
+    showToast(parts.join(' · '));
   }
 
   function createBlankRoute(pattern = '') {
@@ -128,6 +505,14 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
   }
+
+  const ICONS = {
+    plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>',
+    x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>',
+    up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 15-6-6-6 6"></path></svg>',
+    down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>',
+    test: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>'
+  };
 
   function closeCustomSelects(exceptShell = null) {
     document.querySelectorAll('.select-shell.open').forEach((shell) => {
@@ -292,10 +677,10 @@ document.addEventListener('DOMContentLoaded', () => {
     proxyList.innerHTML = proxies.map((proxy) => {
       const hasAuth = Boolean(proxy.username || proxy.password);
       return `
-        <article class="proxy-card" data-proxy-id="${escapeHtml(proxy.id)}">
+        <article class="glass-panel proxy-card" data-proxy-id="${escapeHtml(proxy.id)}">
           <div class="proxy-card-header">
             <input class="profile-name" type="text" value="${escapeHtml(proxy.name)}" placeholder="Proxy name" aria-label="Proxy profile name" autocomplete="off">
-            <button type="button" class="icon-btn danger" data-action="remove-proxy" title="Remove proxy" aria-label="Remove proxy">×</button>
+            <button type="button" class="icon-btn danger" data-action="remove-proxy" title="Remove proxy" aria-label="Remove proxy">${ICONS.x}</button>
           </div>
 
           <div class="form-grid">
@@ -366,13 +751,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     routeList.innerHTML = routes.map((route, index) => `
-      <article class="route-card" data-route-id="${escapeHtml(route.id)}">
+      <article class="glass-panel route-card" data-route-id="${escapeHtml(route.id)}">
         <div class="route-card-top">
           <span class="route-order">Rule ${index + 1}</span>
           <div class="route-actions">
-            <button type="button" class="icon-btn" data-action="move-up" title="Move up" aria-label="Move rule up" ${index === 0 ? 'disabled' : ''}>↑</button>
-            <button type="button" class="icon-btn" data-action="move-down" title="Move down" aria-label="Move rule down" ${index === routes.length - 1 ? 'disabled' : ''}>↓</button>
-            <button type="button" class="icon-btn danger" data-action="remove-route" title="Remove rule" aria-label="Remove rule">×</button>
+            <button type="button" class="icon-btn" data-action="test-route" title="Test this rule without opening a tab" aria-label="Test rule" ${route.pattern.trim() ? '' : 'disabled'}>${ICONS.test}</button>
+            <button type="button" class="icon-btn" data-action="move-up" title="Move up" aria-label="Move rule up" ${index === 0 ? 'disabled' : ''}>${ICONS.up}</button>
+            <button type="button" class="icon-btn" data-action="move-down" title="Move down" aria-label="Move rule down" ${index === routes.length - 1 ? 'disabled' : ''}>${ICONS.down}</button>
+            <button type="button" class="icon-btn danger" data-action="remove-route" title="Remove rule" aria-label="Remove rule">${ICONS.x}</button>
           </div>
         </div>
         <div class="route-fields">
@@ -399,7 +785,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function updateStatusUI(enabled) {
-    statusCard.className = `status-card ${enabled ? 'enabled' : 'disabled'}`;
+    statusCard.classList.toggle('enabled', enabled);
+    statusCard.classList.toggle('disabled', !enabled);
     statusText.textContent = enabled ? 'Enabled' : 'Disabled';
   }
 
@@ -654,6 +1041,29 @@ document.addEventListener('DOMContentLoaded', () => {
     proxyList.querySelector('.proxy-card:last-child .profile-name')?.select();
   });
 
+  btnImportProxy.addEventListener('click', openImportModal);
+  btnImportClose.addEventListener('click', closeImportModal);
+  btnImportCancel.addEventListener('click', closeImportModal);
+  btnImportConfirm.addEventListener('click', applyImportedProxies);
+
+  importModal.addEventListener('click', (event) => {
+    if (event.target === importModal) closeImportModal();
+  });
+
+  importProxyText.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      applyImportedProxies();
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !importModal.classList.contains('hidden')) {
+      event.preventDefault();
+      closeImportModal();
+    }
+  });
+
   btnAddRoute.addEventListener('click', () => {
     captureDraft();
     routes.push(createBlankRoute());
@@ -728,9 +1138,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const button = event.target.closest('[data-action]');
     if (!button) return;
 
-    captureDraft();
     const card = button.closest('.route-card');
     const routeId = card.dataset.routeId;
+
+    if (button.dataset.action === 'test-route') {
+      captureDraft();
+      const route = routes.find((item) => item.id === routeId);
+      if (!route?.pattern?.trim()) {
+        showToast('Enter a website match first', 'error');
+        return;
+      }
+      const url = patternToTestUrl(route.pattern);
+      testUrl.value = url;
+      testBatch.classList.add('hidden');
+      testBatch.innerHTML = '';
+      document.getElementById('test-section')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      runRoutingTest({ probe: true });
+      return;
+    }
+
+    captureDraft();
     const index = routes.findIndex((route) => route.id === routeId);
     if (index < 0) return;
 
@@ -741,6 +1168,8 @@ document.addEventListener('DOMContentLoaded', () => {
       [routes[index - 1], routes[index]] = [routes[index], routes[index - 1]];
     } else if (action === 'move-down' && index < routes.length - 1) {
       [routes[index + 1], routes[index]] = [routes[index], routes[index + 1]];
+    } else {
+      return;
     }
 
     renderRouteList();
@@ -802,12 +1231,97 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  btnTest.addEventListener('click', runRoutingTest);
+  btnTest.addEventListener('click', () => runRoutingTest({ probe: false }));
+  btnProbe.addEventListener('click', () => runRoutingTest({ probe: true }));
+  btnTestAllRules.addEventListener('click', runAllRulesTest);
   testUrl.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') runRoutingTest();
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      runRoutingTest({ probe: event.shiftKey });
+    }
   });
 
-  function runRoutingTest() {
+  function patternToTestUrl(pattern) {
+    const value = String(pattern || '').trim();
+    if (!value) return '';
+    if (/^https?:\/\//i.test(value)) return value;
+
+    // *.example.com → https://www.example.com
+    // *medium* → skip; keep simple host cases
+    let host = value.replace(/\*/g, 'www');
+    host = host.replace(/^\.+/, '').replace(/\.+$/, '');
+    if (!host) host = value.replace(/\*/g, '');
+    return `https://${host}`;
+  }
+
+  function formatRouteMatch(result) {
+    if (result.error) {
+      return {
+        badge: 'ERROR',
+        tone: 'error',
+        reason: result.error
+      };
+    }
+    if (result.direct) {
+      return {
+        badge: 'DIRECT',
+        tone: 'direct',
+        reason: result.route
+          ? `Rule “${result.route.pattern}” forces a direct connection`
+          : 'No matching rule'
+      };
+    }
+    return {
+      badge: result.proxy.type,
+      tone: 'proxy',
+      reason: `${result.route.pattern} → ${result.proxy.name} (${formatEndpoint(result.proxy)})`
+    };
+  }
+
+  function setProbePending(message = 'Checking…') {
+    probeBadge.textContent = '…';
+    probeBadge.className = 'result-badge neutral';
+    probeReason.textContent = message;
+  }
+
+  function setProbeIdle() {
+    probeBadge.textContent = '—';
+    probeBadge.className = 'result-badge neutral';
+    probeReason.textContent = 'Run Probe to check connectivity';
+  }
+
+  async function probeUrl(url) {
+    const controller = new AbortController();
+    const timeoutMs = 9000;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const started = performance.now();
+
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        cache: 'no-store',
+        redirect: 'follow',
+        signal: controller.signal,
+        credentials: 'omit'
+      });
+      const ms = Math.round(performance.now() - started);
+      clearTimeout(timer);
+      return {
+        ok: response.ok || (response.status >= 300 && response.status < 500),
+        status: response.status,
+        ms
+      };
+    } catch (error) {
+      clearTimeout(timer);
+      const ms = Math.round(performance.now() - started);
+      if (error?.name === 'AbortError') {
+        return { ok: false, error: `Timeout after ${timeoutMs / 1000}s`, ms };
+      }
+      return { ok: false, error: error?.message || 'Network error', ms };
+    }
+  }
+
+  async function runRoutingTest({ probe = false } = {}) {
     const input = testUrl.value.trim();
     if (!input) return failValidation('Enter a website URL to test.', testUrl);
 
@@ -817,28 +1331,86 @@ document.addEventListener('DOMContentLoaded', () => {
     proxies = config.proxies;
     routes = config.routes;
     const result = simulateRouting(input, proxies, routes);
+    const match = formatRouteMatch(result);
 
     testResult.classList.remove('hidden');
+    testBatch.classList.add('hidden');
+    resultBadge.textContent = match.badge;
+    resultBadge.className = `result-badge ${match.tone}`;
+    resultReason.textContent = match.reason;
 
-    if (result.error) {
-      resultBadge.textContent = 'ERROR';
-      resultBadge.className = 'result-badge error';
-      resultReason.textContent = result.error;
+    if (!probe) {
+      setProbeIdle();
       return;
     }
 
-    if (result.direct) {
-      resultBadge.textContent = 'DIRECT';
-      resultBadge.className = 'result-badge direct';
-      resultReason.textContent = result.route
-        ? `Rule “${result.route.pattern}” forces a direct connection`
-        : 'No matching rule';
+    let probeTarget = input;
+    if (!/^https?:\/\//i.test(probeTarget)) {
+      probeTarget = `https://${probeTarget}`;
+    }
+
+    setProbePending(extToggle.checked
+      ? 'Fetching through current browser proxy settings…'
+      : 'Extension is off — probing DIRECT (enable + Apply for proxy path)');
+
+    btnProbe.disabled = true;
+    btnTest.disabled = true;
+    const live = await probeUrl(probeTarget);
+    btnProbe.disabled = false;
+    btnTest.disabled = false;
+
+    if (live.ok) {
+      probeBadge.textContent = 'OK';
+      probeBadge.className = 'result-badge direct';
+      probeReason.textContent = `HTTP ${live.status} · ${live.ms} ms`;
       return;
     }
 
-    resultBadge.textContent = result.proxy.type;
-    resultBadge.className = 'result-badge proxy';
-    resultReason.textContent = `${result.route.pattern} → ${result.proxy.name} (${formatEndpoint(result.proxy)})`;
+    probeBadge.textContent = 'FAIL';
+    probeBadge.className = 'result-badge error';
+    probeReason.textContent = `${live.error || 'Unreachable'} · ${live.ms} ms`;
+  }
+
+  async function runAllRulesTest() {
+    captureDraft();
+    const activeRoutes = routes.filter((route) => route.pattern.trim());
+    if (activeRoutes.length === 0) {
+      showToast('No routing rules to test', 'error');
+      return;
+    }
+
+    testBatch.classList.remove('hidden');
+    testResult.classList.add('hidden');
+    testBatch.innerHTML = `<div class="test-batch-status">Testing ${activeRoutes.length} rule${activeRoutes.length === 1 ? '' : 's'}…</div>`;
+
+    btnTestAllRules.disabled = true;
+    const rows = [];
+
+    for (let index = 0; index < activeRoutes.length; index += 1) {
+      const route = activeRoutes[index];
+      const url = patternToTestUrl(route.pattern);
+      const match = formatRouteMatch(simulateRouting(url, proxies, routes));
+      const live = await probeUrl(url);
+
+      rows.push(`
+        <div class="test-batch-row">
+          <div class="test-batch-main">
+            <strong>Rule ${index + 1}</strong>
+            <span class="test-batch-pattern">${escapeHtml(route.pattern)}</span>
+          </div>
+          <div class="test-batch-meta">
+            <span class="result-badge ${match.tone}">${escapeHtml(match.badge)}</span>
+            <span class="result-badge ${live.ok ? 'direct' : 'error'}">${live.ok ? `OK ${live.ms}ms` : 'FAIL'}</span>
+          </div>
+          <div class="test-batch-detail">${escapeHtml(match.reason)}${live.ok ? '' : ` · ${escapeHtml(live.error || 'Unreachable')}`}</div>
+        </div>
+      `);
+
+      testBatch.innerHTML = rows.join('');
+    }
+
+    btnTestAllRules.disabled = false;
+    showToast(`Finished testing ${activeRoutes.length} rule${activeRoutes.length === 1 ? '' : 's'}`);
   }
 
   chrome.storage.local.get(

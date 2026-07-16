@@ -10,7 +10,9 @@
   <div class="app-container">
     <header class="app-header">
       <div class="logo-area">
-        <div class="logo-mark" aria-hidden="true">BF</div>
+        <div class="logo-mark" aria-hidden="true">
+          <img src="icons/icon48.png" alt="" width="22" height="22">
+        </div>
         <div class="logo-text">
           <h1>Bypass Flow</h1>
           <span>Per-site proxy routing</span>
@@ -24,12 +26,14 @@
     </header>
 
     <main class="app-body">
-      <section class="status-card disabled" id="status-card">
+      <section class="glass-panel status-card disabled" id="status-card">
         <div class="status-indicator">
-          <span class="status-dot"></span>
           <div>
             <span class="eyebrow">Routing status</span>
-            <strong class="status-label" id="status-text">Disabled</strong>
+            <div class="status-line">
+              <span class="status-dot" aria-hidden="true"></span>
+              <strong class="status-label" id="status-text">Disabled</strong>
+            </div>
           </div>
         </div>
         <div class="status-stats">
@@ -44,9 +48,16 @@
         </div>
       </section>
 
-      <section class="current-site-card" id="current-site-card">
+      <section class="glass-panel current-site-card" id="current-site-card">
         <div class="current-site-main">
-          <div class="site-orb" aria-hidden="true"><span></span></div>
+          <div class="site-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="9"></circle>
+              <path d="M3 12h18"></path>
+              <path d="M12 3a14 14 0 0 1 0 18"></path>
+              <path d="M12 3a14 14 0 0 0 0 18"></path>
+            </svg>
+          </div>
           <div class="current-site-copy">
             <span class="eyebrow">Current tab</span>
             <strong id="current-host">Detecting website…</strong>
@@ -65,9 +76,20 @@
             <h2>Proxy profiles</h2>
             <p>IPv4, domain names and IPv6 are supported.</p>
           </div>
-          <button type="button" class="btn btn-small" id="btn-add-proxy">
-            <span aria-hidden="true">＋</span> Add
-          </button>
+          <div class="section-actions">
+            <button type="button" class="btn btn-small" id="btn-import-proxy" title="Import proxies in bulk">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M7 10l5 5 5-5"></path><path d="M12 15V3"></path></svg>
+              </span>
+              Import
+            </button>
+            <button type="button" class="btn btn-small" id="btn-add-proxy">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
+              </span>
+              Add
+            </button>
+          </div>
         </div>
         <div class="stack" id="proxy-list"></div>
       </section>
@@ -79,7 +101,10 @@
             <p>Rules run from top to bottom. First match wins.</p>
           </div>
           <button type="button" class="btn btn-small" id="btn-add-route">
-            <span aria-hidden="true">＋</span> Add
+            <span class="btn-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
+            </span>
+            Add
           </button>
         </div>
         <div class="stack" id="route-list"></div>
@@ -91,37 +116,109 @@
         </div>
       </section>
 
-      <section class="config-section">
+      <section class="config-section" id="test-section">
         <div class="section-header">
           <div>
             <h2>Test routing</h2>
-            <p>Preview the current form before applying changes.</p>
+            <p>Match rules and probe a site without opening a tab.</p>
           </div>
+          <button type="button" class="btn btn-small" id="btn-test-all-rules" title="Test every routing rule">
+            <span class="btn-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+            </span>
+            Test all
+          </button>
         </div>
-        <div class="card test-card">
+        <div class="glass-panel test-card">
           <label class="field field-grow">
             <span>Website URL</span>
             <div class="test-input-row">
-              <input type="url" id="test-url" placeholder="https://example.com/page" autocomplete="off">
-              <button type="button" class="btn btn-secondary" id="btn-test">Test</button>
+              <input type="url" id="test-url" placeholder="https://reddit.com" autocomplete="off" spellcheck="false">
+              <button type="button" class="btn btn-secondary" id="btn-test" title="Show which rule and proxy match">Match</button>
+              <button type="button" class="btn btn-secondary" id="btn-probe" title="Fetch the URL through current browser proxy settings">Probe</button>
             </div>
           </label>
           <div class="test-result-box hidden" id="test-result">
-            <span class="result-badge direct" id="result-badge">DIRECT</span>
-            <span class="result-reason" id="result-reason">No matching rule</span>
+            <div class="test-result-row">
+              <span class="test-result-label">Route</span>
+              <span class="result-badge direct" id="result-badge">DIRECT</span>
+              <span class="result-reason" id="result-reason">No matching rule</span>
+            </div>
+            <div class="test-result-row" id="probe-result-row">
+              <span class="test-result-label">Live</span>
+              <span class="result-badge neutral" id="probe-badge">—</span>
+              <span class="result-reason" id="probe-reason">Run Probe to check connectivity</span>
+            </div>
           </div>
+          <div class="test-batch hidden" id="test-batch" aria-live="polite"></div>
         </div>
       </section>
     </main>
 
     <footer class="app-footer">
       <div class="save-state" id="save-state">
-        <span class="save-state-dot"></span>
+        <span class="save-state-icon" aria-hidden="true">
+          <svg class="icon-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path></svg>
+          <svg class="icon-edit" viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+        </span>
         <span id="save-state-text">Up to date</span>
       </div>
       <button type="button" class="btn btn-primary" id="btn-save" disabled>Apply changes</button>
       <div id="toast" class="toast hidden" role="status" aria-live="polite">Saved</div>
     </footer>
+
+    <div class="modal-overlay hidden" id="import-modal" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
+      <div class="modal-panel glass-panel">
+        <div class="modal-header">
+          <div>
+            <h2 id="import-modal-title">Import proxies</h2>
+            <p>One proxy per line. Scheme and host/auth format are auto-detected per line.</p>
+          </div>
+          <button type="button" class="icon-btn" id="btn-import-close" title="Close" aria-label="Close import">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+          </button>
+        </div>
+
+        <label class="field">
+          <span>Fallback protocol</span>
+          <select id="import-default-type" aria-label="Fallback proxy protocol for lines without scheme">
+            <option value="HTTP" selected>HTTP</option>
+            <option value="HTTPS">HTTPS</option>
+            <option value="SOCKS5">SOCKS5</option>
+          </select>
+          <span class="field-hint">Only used when a line has no scheme (no http://, socks5://, …).</span>
+        </label>
+
+        <label class="field">
+          <span>Proxy list</span>
+          <textarea
+            id="import-proxy-text"
+            rows="9"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="1.2.3.4:8080&#10;user:pass@1.2.3.4:8080&#10;1.2.3.4:8080:user:pass&#10;http://1.2.3.4:8080&#10;socks5://user:pass@1.2.3.4:1080&#10;[2001:db8::1]:8080"
+          ></textarea>
+        </label>
+
+        <div class="hint-card import-hint" aria-label="Supported formats">
+          <span>Formats</span>
+          <code>host:port</code>
+          <code>host:port:user:pass</code>
+          <code>user:pass@host:port</code>
+          <code>host:port@user:pass</code>
+          <code>http://…</code>
+          <code>socks5://…</code>
+          <code>type|host|port|user|pass</code>
+        </div>
+
+        <p class="import-feedback hidden" id="import-feedback" role="status"></p>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" id="btn-import-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btn-import-confirm">Import</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="popup.js"></script>
